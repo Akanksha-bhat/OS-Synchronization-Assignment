@@ -1,0 +1,454 @@
+package task2;
+
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.Semaphore;
+
+public class ReadersWritersSemaphore {
+
+    // Semaphores for synchronization
+    static Semaphore mutex = new Semaphore(1, true);
+    static Semaphore rwMutex = new Semaphore(1, true);
+
+    // Number of readers currently reading
+    static int readCount = 0;
+
+    // Process states
+    static Map<String, String> readers = new LinkedHashMap<>();
+    static Map<String, String> writers = new LinkedHashMap<>();
+
+    // Shared resource activity
+    static Set<String> activeReaders = new TreeSet<>();
+    static String activeWriter = null;
+
+    // Stores actual execution events
+    static List<String> events = new ArrayList<>();
+
+    static final Object eventLock = new Object();
+
+    // Record states and events
+    static void record(String message, String id,
+                       String state, String action) {
+
+        synchronized (eventLock) {
+
+            if (id != null) {
+                if (id.startsWith("R")) {
+                    readers.put(id, state);
+                } else {
+                    writers.put(id, state);
+                }
+            }
+
+            if ("reader_start".equals(action)) {
+                activeReaders.add(id);
+            } else if ("reader_end".equals(action)) {
+                activeReaders.remove(id);
+            } else if ("writer_start".equals(action)) {
+                activeWriter = id;
+            } else if ("writer_end".equals(action)) {
+                activeWriter = null;
+            }
+
+            String resource;
+
+            if (activeWriter != null) {
+                resource = "Being Written";
+            } else if (!activeReaders.isEmpty()) {
+                resource = "Being Read";
+            } else {
+                resource = "Free";
+            }
+
+            String event =
+                "{\"number\":" + (events.size() + 1)
+                + ",\"message\":" + json(message)
+                + ",\"readers\":" + jsonMap(readers)
+                + ",\"writers\":" + jsonMap(writers)
+                + ",\"active_readers\":" + jsonList(activeReaders)
+                + ",\"active_writer\":" + json(activeWriter)
+                + ",\"resource\":" + json(resource) + "}";
+
+            events.add(event);
+
+            System.out.println(
+                "Event " + events.size() + ": " + message
+            );
+        }
+    }
+
+    // Reader thread
+    static void reader(String id) {
+
+        record(id + " is waiting to read",
+               id, "Waiting", null);
+
+        try {
+            mutex.acquire();
+
+            readCount++;
+
+            // First reader locks the shared resource
+            if (readCount == 1) {
+                rwMutex.acquire();
+            }
+
+            record(id + " entered the reading section",
+                   id, "Reading", "reader_start");
+
+            mutex.release();
+
+            // Simulate reading
+            Thread.sleep(1000);
+
+            mutex.acquire();
+
+            readCount--;
+
+            record(id + " finished reading",
+                   id, "Finished", "reader_end");
+
+            // Last reader releases the resource
+            if (readCount == 0) {
+                rwMutex.release();
+            }
+
+            mutex.release();
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            // Release mutex if an unexpected interruption
+            // occurred while acquiring rwMutex.
+            // Normal execution releases it above.
+        }
+    }
+
+    // Writer thread
+    static void writer(String id) {
+
+        record(id + " is waiting to write",
+               id, "Waiting", null);
+
+        try {
+            rwMutex.acquire();
+
+            record(id + " entered the writing section",
+                   id, "Writing", "writer_start");
+
+            // Simulate writing
+            Thread.sleep(1500);
+
+            record(id + " finished writing",
+                   id, "Finished", "writer_end");
+
+            rwMutex.release();
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // Convert text safely into JSON strings
+    static String json(String value) {
+
+        if (value == null) {
+            return "null";
+        }
+
+        return "\"" + value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t") + "\"";
+    }
+
+    static String jsonMap(Map<String, String> map) {
+
+        StringJoiner result = new StringJoiner(",", "{", "}");
+
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            result.add(json(entry.getKey()) + ":"
+                       + json(entry.getValue()));
+        }
+
+        return result.toString();
+    }
+
+    static String jsonList(Collection<String> values) {
+
+        StringJoiner result = new StringJoiner(",", "[", "]");
+
+        for (String value : values) {
+            result.add(json(value));
+        }
+
+        return result.toString();
+    }
+
+    // Generate HTML from recorded execution events
+    static void generateHTML() throws IOException {
+
+        String eventData = "[" + String.join(",", events) + "]";
+
+        String html = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Readers-Writers Simulation</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f2f6fc;
+    color: #243047;
+    padding: 20px;
+}
+h1 { color: #234c83; }
+.panel {
+    background: white;
+    padding: 16px;
+    margin: 15px 0;
+    border-radius: 10px;
+    box-shadow: 0 2px 7px #0001;
+}
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+}
+.process {
+    background: #edf1f7;
+    padding: 12px;
+    border-radius: 8px;
+}
+.status {
+    display: inline-block;
+    padding: 5px 8px;
+    margin-top: 8px;
+    border-radius: 12px;
+    background: #e5e7eb;
+}
+.Reading { background: #c8f7d2; }
+.Writing { background: #ffcaca; }
+.Waiting { background: #ffedb5; }
+.Finished { background: #dce5f0; }
+button {
+    background: #234c83;
+    color: white;
+    border: 0;
+    padding: 10px 14px;
+    margin: 4px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.event {
+    border-left: 4px solid #6595d6;
+    background: #f4f7ff;
+    padding: 10px;
+    margin: 8px 0;
+}
+input { width: 100%; }
+</style>
+</head>
+
+<body>
+<h1>Readers-Writers Problem</h1>
+<p>Semaphore-based synchronization simulation</p>
+
+<div class="panel">
+<h2>Shared Resource</h2>
+<h3 id="resource">Free</h3>
+<p id="active">No active processes</p>
+</div>
+
+<div class="panel">
+<h2>Reader States</h2>
+<div id="readers" class="grid"></div>
+</div>
+
+<div class="panel">
+<h2>Writer States</h2>
+<div id="writers" class="grid"></div>
+</div>
+
+<div class="panel">
+<h2>Event Timeline</h2>
+<p id="counter"></p>
+<input type="range" id="slider" min="0" value="0">
+<p id="message"></p>
+<button onclick="previous()">Previous</button>
+<button onclick="next()">Next</button>
+<button onclick="play()">Play</button>
+<button onclick="pause()">Pause</button>
+</div>
+
+<div class="panel">
+<h2>Complete Execution Log</h2>
+<div id="timeline"></div>
+</div>
+
+<script>
+const events = EVENT_DATA;
+let current = 0;
+let timer = null;
+
+const slider = document.getElementById("slider");
+slider.max = Math.max(0, events.length - 1);
+
+function showStates(id, states) {
+    const box = document.getElementById(id);
+    box.innerHTML = "";
+
+    Object.entries(states).forEach(([name, state]) => {
+        const card = document.createElement("div");
+        card.className = "process";
+
+        const title = document.createElement("strong");
+        title.textContent = name;
+
+        const badge = document.createElement("div");
+        badge.className = "status " + state;
+        badge.textContent = state;
+
+        card.append(title, badge);
+        box.appendChild(card);
+    });
+}
+
+function render(index) {
+    if (!events.length) return;
+
+    current = Math.max(0, Math.min(index, events.length - 1));
+    const e = events[current];
+
+    showStates("readers", e.readers);
+    showStates("writers", e.writers);
+
+    document.getElementById("resource").textContent = e.resource;
+
+    let active = [];
+    if (e.active_readers.length)
+        active.push("Reading: " + e.active_readers.join(", "));
+    if (e.active_writer)
+        active.push("Writing: " + e.active_writer);
+
+    document.getElementById("active").textContent =
+        active.length ? active.join(" | ") : "No active processes";
+
+    document.getElementById("counter").textContent =
+        "Event " + e.number + " of " + events.length;
+
+    document.getElementById("message").textContent = e.message;
+    slider.value = current;
+}
+
+function previous() {
+    pause();
+    render(current - 1);
+}
+
+function next() {
+    pause();
+    render(current + 1);
+}
+
+function play() {
+    pause();
+    timer = setInterval(() => {
+        if (current >= events.length - 1) {
+            pause();
+            return;
+        }
+        render(current + 1);
+    }, 900);
+}
+
+function pause() {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+}
+
+slider.addEventListener("input", () => {
+    pause();
+    render(Number(slider.value));
+});
+
+events.forEach(e => {
+    const item = document.createElement("div");
+    item.className = "event";
+
+    const title = document.createElement("strong");
+    title.textContent = "Event " + e.number;
+
+    const message = document.createElement("p");
+    message.textContent = e.message;
+
+    item.append(title, message);
+    document.getElementById("timeline").appendChild(item);
+});
+
+render(0);
+</script>
+</body>
+</html>
+""";
+
+        html = html.replace("EVENT_DATA", eventData);
+
+        try (FileWriter file = new FileWriter("simulation.html")) {
+            file.write(html);
+        }
+
+        System.out.println("\nHTML simulation generated successfully!");
+    }
+
+    // Main method
+    public static void main(String[] args) {
+
+        readers.put("R1", "Not Started");
+        readers.put("R2", "Not Started");
+        readers.put("R3", "Not Started");
+
+        writers.put("W1", "Not Started");
+        writers.put("W2", "Not Started");
+
+        List<Thread> threads = new ArrayList<>();
+
+        System.out.println("Starting Readers-Writers Problem\\n");
+
+        for (String id : readers.keySet()) {
+            threads.add(new Thread(() -> reader(id)));
+        }
+
+        for (String id : writers.keySet()) {
+            threads.add(new Thread(() -> writer(id)));
+        }
+
+        for (Thread t : threads) {
+            t.start();
+        }
+
+        for (Thread t : threads) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.out.println("Main thread interrupted.");
+                return;
+            }
+        }
+        try {
+        	generateHTML();
+        	} catch (IOException e) {
+        		System.out.println("Error generating HTML: " + e.getMessage());
+        		}
+
+        System.out.println("\nAll processes completed.");
+
+    }
+}
