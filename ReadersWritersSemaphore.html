@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Readers-Writers Simulation</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f2f6fc;
+    color: #243047;
+    padding: 20px;
+}
+h1 { color: #234c83; }
+.panel {
+    background: white;
+    padding: 16px;
+    margin: 15px 0;
+    border-radius: 10px;
+    box-shadow: 0 2px 7px #0001;
+}
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+}
+.process {
+    background: #edf1f7;
+    padding: 12px;
+    border-radius: 8px;
+}
+.status {
+    display: inline-block;
+    padding: 5px 8px;
+    margin-top: 8px;
+    border-radius: 12px;
+    background: #e5e7eb;
+}
+.Reading { background: #c8f7d2; }
+.Writing { background: #ffcaca; }
+.Waiting { background: #ffedb5; }
+.Finished { background: #dce5f0; }
+button {
+    background: #234c83;
+    color: white;
+    border: 0;
+    padding: 10px 14px;
+    margin: 4px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.event {
+    border-left: 4px solid #6595d6;
+    background: #f4f7ff;
+    padding: 10px;
+    margin: 8px 0;
+}
+input { width: 100%; }
+</style>
+</head>
+
+<body>
+<h1>Readers-Writers Problem</h1>
+<p>Semaphore-based synchronization simulation</p>
+
+<div class="panel">
+<h2>Shared Resource</h2>
+<h3 id="resource">Free</h3>
+<p id="active">No active processes</p>
+</div>
+
+<div class="panel">
+<h2>Reader States</h2>
+<div id="readers" class="grid"></div>
+</div>
+
+<div class="panel">
+<h2>Writer States</h2>
+<div id="writers" class="grid"></div>
+</div>
+
+<div class="panel">
+<h2>Event Timeline</h2>
+<p id="counter"></p>
+<input type="range" id="slider" min="0" value="0">
+<p id="message"></p>
+<button onclick="previous()">Previous</button>
+<button onclick="next()">Next</button>
+<button onclick="play()">Play</button>
+<button onclick="pause()">Pause</button>
+</div>
+
+<div class="panel">
+<h2>Complete Execution Log</h2>
+<div id="timeline"></div>
+</div>
+
+<script>
+const events = [{"number":1,"message":"R2 is waiting to read","readers":{"R1":"Not Started","R2":"Waiting","R3":"Not Started"},"writers":{"W1":"Not Started","W2":"Not Started"},"active_readers":[],"active_writer":null,"resource":"Free"},{"number":2,"message":"W2 is waiting to write","readers":{"R1":"Not Started","R2":"Waiting","R3":"Not Started"},"writers":{"W1":"Not Started","W2":"Waiting"},"active_readers":[],"active_writer":null,"resource":"Free"},{"number":3,"message":"W1 is waiting to write","readers":{"R1":"Not Started","R2":"Waiting","R3":"Not Started"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":[],"active_writer":null,"resource":"Free"},{"number":4,"message":"R1 is waiting to read","readers":{"R1":"Waiting","R2":"Waiting","R3":"Not Started"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":[],"active_writer":null,"resource":"Free"},{"number":5,"message":"R3 is waiting to read","readers":{"R1":"Waiting","R2":"Waiting","R3":"Waiting"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":[],"active_writer":null,"resource":"Free"},{"number":6,"message":"R2 entered the reading section","readers":{"R1":"Waiting","R2":"Reading","R3":"Waiting"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":["R2"],"active_writer":null,"resource":"Being Read"},{"number":7,"message":"R1 entered the reading section","readers":{"R1":"Reading","R2":"Reading","R3":"Waiting"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":["R1","R2"],"active_writer":null,"resource":"Being Read"},{"number":8,"message":"R3 entered the reading section","readers":{"R1":"Reading","R2":"Reading","R3":"Reading"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":["R1","R2","R3"],"active_writer":null,"resource":"Being Read"},{"number":9,"message":"R3 finished reading","readers":{"R1":"Reading","R2":"Reading","R3":"Finished"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":["R1","R2"],"active_writer":null,"resource":"Being Read"},{"number":10,"message":"R1 finished reading","readers":{"R1":"Finished","R2":"Reading","R3":"Finished"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":["R2"],"active_writer":null,"resource":"Being Read"},{"number":11,"message":"R2 finished reading","readers":{"R1":"Finished","R2":"Finished","R3":"Finished"},"writers":{"W1":"Waiting","W2":"Waiting"},"active_readers":[],"active_writer":null,"resource":"Free"},{"number":12,"message":"W2 entered the writing section","readers":{"R1":"Finished","R2":"Finished","R3":"Finished"},"writers":{"W1":"Waiting","W2":"Writing"},"active_readers":[],"active_writer":"W2","resource":"Being Written"},{"number":13,"message":"W2 finished writing","readers":{"R1":"Finished","R2":"Finished","R3":"Finished"},"writers":{"W1":"Waiting","W2":"Finished"},"active_readers":[],"active_writer":null,"resource":"Free"},{"number":14,"message":"W1 entered the writing section","readers":{"R1":"Finished","R2":"Finished","R3":"Finished"},"writers":{"W1":"Writing","W2":"Finished"},"active_readers":[],"active_writer":"W1","resource":"Being Written"},{"number":15,"message":"W1 finished writing","readers":{"R1":"Finished","R2":"Finished","R3":"Finished"},"writers":{"W1":"Finished","W2":"Finished"},"active_readers":[],"active_writer":null,"resource":"Free"}];
+let current = 0;
+let timer = null;
+
+const slider = document.getElementById("slider");
+slider.max = Math.max(0, events.length - 1);
+
+function showStates(id, states) {
+    const box = document.getElementById(id);
+    box.innerHTML = "";
+
+    Object.entries(states).forEach(([name, state]) => {
+        const card = document.createElement("div");
+        card.className = "process";
+
+        const title = document.createElement("strong");
+        title.textContent = name;
+
+        const badge = document.createElement("div");
+        badge.className = "status " + state;
+        badge.textContent = state;
+
+        card.append(title, badge);
+        box.appendChild(card);
+    });
+}
+
+function render(index) {
+    if (!events.length) return;
+
+    current = Math.max(0, Math.min(index, events.length - 1));
+    const e = events[current];
+
+    showStates("readers", e.readers);
+    showStates("writers", e.writers);
+
+    document.getElementById("resource").textContent = e.resource;
+
+    let active = [];
+    if (e.active_readers.length)
+        active.push("Reading: " + e.active_readers.join(", "));
+    if (e.active_writer)
+        active.push("Writing: " + e.active_writer);
+
+    document.getElementById("active").textContent =
+        active.length ? active.join(" | ") : "No active processes";
+
+    document.getElementById("counter").textContent =
+        "Event " + e.number + " of " + events.length;
+
+    document.getElementById("message").textContent = e.message;
+    slider.value = current;
+}
+
+function previous() {
+    pause();
+    render(current - 1);
+}
+
+function next() {
+    pause();
+    render(current + 1);
+}
+
+function play() {
+    pause();
+    timer = setInterval(() => {
+        if (current >= events.length - 1) {
+            pause();
+            return;
+        }
+        render(current + 1);
+    }, 900);
+}
+
+function pause() {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+}
+
+slider.addEventListener("input", () => {
+    pause();
+    render(Number(slider.value));
+});
+
+events.forEach(e => {
+    const item = document.createElement("div");
+    item.className = "event";
+
+    const title = document.createElement("strong");
+    title.textContent = "Event " + e.number;
+
+    const message = document.createElement("p");
+    message.textContent = e.message;
+
+    item.append(title, message);
+    document.getElementById("timeline").appendChild(item);
+});
+
+render(0);
+</script>
+</body>
+</html>
