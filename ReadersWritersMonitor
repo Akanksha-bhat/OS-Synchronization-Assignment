@@ -1,0 +1,531 @@
+package task2;
+
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.*;
+
+public class ReadersWritersMonitor {
+
+    // --------------------------------
+    // MONITOR CLASS
+    // --------------------------------
+
+    static class ReadWriteMonitor {
+
+        private int readCount = 0;
+        private boolean writerActive = false;
+
+        private final Map<String, String> readers =
+                new LinkedHashMap<>();
+
+        private final Map<String, String> writers =
+                new LinkedHashMap<>();
+
+        private final Set<String> activeReaders =
+                new TreeSet<>();
+
+        private String activeWriter = null;
+
+        // Stores execution events for the HTML simulation
+        private final List<String> events = new ArrayList<>();
+
+        // Record an event and save the current states.
+        // Called only while holding this monitor's lock.
+        private void record(String message) {
+
+            String resource;
+
+            if (writerActive) {
+                resource = "Being Written";
+            } else if (readCount > 0) {
+                resource = "Being Read";
+            } else {
+                resource = "Free";
+            }
+
+            String event =
+                    "{\"number\":" + (events.size() + 1)
+                    + ",\"message\":" + json(message)
+                    + ",\"readers\":" + jsonMap(readers)
+                    + ",\"writers\":" + jsonMap(writers)
+                    + ",\"active_readers\":" + jsonList(activeReaders)
+                    + ",\"active_writer\":" + json(activeWriter)
+                    + ",\"resource\":" + json(resource)
+                    + "}";
+
+            events.add(event);
+
+            System.out.println(
+                    "Event " + events.size() + ": " + message
+            );
+        }
+
+        // Register the readers and writers before starting threads
+        synchronized void addReader(String id) {
+            readers.put(id, "Not Started");
+        }
+
+        synchronized void addWriter(String id) {
+            writers.put(id, "Not Started");
+        }
+
+        // --------------------------------
+        // READER ENTERS THE MONITOR
+        // --------------------------------
+
+        synchronized void startReading(String id)
+                throws InterruptedException {
+
+            readers.put(id, "Waiting");
+            record(id + " is waiting to read");
+
+            // A reader must wait if a writer is active.
+            while (writerActive) {
+                wait();
+            }
+
+            // Multiple readers may read together.
+            readCount++;
+            activeReaders.add(id);
+            readers.put(id, "Reading");
+
+            record(id + " entered the reading section");
+        }
+
+        // --------------------------------
+        // READER LEAVES THE MONITOR
+        // --------------------------------
+
+        synchronized void finishReading(String id) {
+
+            activeReaders.remove(id);
+            readCount--;
+
+            readers.put(id, "Finished");
+
+            record(id + " finished reading");
+
+            // Wake up waiting readers and writers.
+            notifyAll();
+        }
+
+        // --------------------------------
+        // WRITER ENTERS THE MONITOR
+        // --------------------------------
+
+        synchronized void startWriting(String id)
+                throws InterruptedException {
+
+            writers.put(id, "Waiting");
+            record(id + " is waiting to write");
+
+            // A writer waits until no readers or writers
+            // are using the shared resource.
+            while (writerActive || readCount > 0) {
+                wait();
+            }
+
+            writerActive = true;
+            activeWriter = id;
+            writers.put(id, "Writing");
+
+            record(id + " entered the writing section");
+        }
+
+        // --------------------------------
+        // WRITER LEAVES THE MONITOR
+        // --------------------------------
+
+        synchronized void finishWriting(String id) {
+
+            writerActive = false;
+            activeWriter = null;
+
+            writers.put(id, "Finished");
+
+            record(id + " finished writing");
+
+            // Allow waiting threads to check their conditions.
+            notifyAll();
+        }
+
+        // Return the recorded events for HTML generation.
+        synchronized String getEventsJSON() {
+            return "[" + String.join(",", events) + "]";
+        }
+    }
+
+    // --------------------------------
+    // JSON HELPER METHODS
+    // --------------------------------
+
+    static String json(String value) {
+
+        if (value == null) {
+            return "null";
+        }
+
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+                + "\"";
+    }
+
+    static String jsonMap(Map<String, String> map) {
+
+        StringJoiner result = new StringJoiner(",", "{", "}");
+
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            result.add(
+                    json(entry.getKey()) + ":"
+                    + json(entry.getValue())
+            );
+        }
+
+        return result.toString();
+    }
+
+    static String jsonList(Collection<String> values) {
+
+        StringJoiner result = new StringJoiner(",", "[", "]");
+
+        for (String value : values) {
+            result.add(json(value));
+        }
+
+        return result.toString();
+    }
+
+    // --------------------------------
+    // GENERATE HTML SIMULATION
+    // --------------------------------
+
+    static void generateHTML(String eventData) throws IOException {
+
+        String page = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Readers-Writers Monitor Simulation</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f2f6fc;
+    color: #243047;
+    padding: 20px;
+}
+h1 { color: #234c83; }
+.panel {
+    background: white;
+    padding: 16px;
+    margin: 15px 0;
+    border-radius: 10px;
+    box-shadow: 0 2px 7px #0001;
+}
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+}
+.process {
+    background: #edf1f7;
+    padding: 12px;
+    border-radius: 8px;
+}
+.status {
+    display: inline-block;
+    padding: 5px 8px;
+    margin-top: 8px;
+    border-radius: 12px;
+    background: #e5e7eb;
+}
+.Reading { background: #c8f7d2; }
+.Writing { background: #ffcaca; }
+.Waiting { background: #ffedb5; }
+.Finished { background: #dce5f0; }
+button {
+    background: #234c83;
+    color: white;
+    border: 0;
+    padding: 10px 14px;
+    margin: 4px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+input { width: 100%; }
+.event {
+    border-left: 4px solid #6595d6;
+    background: #f4f7ff;
+    padding: 10px;
+    margin: 8px 0;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Readers-Writers Problem</h1>
+<p>Monitor-based synchronization in Java</p>
+
+<div class="panel">
+    <h2>Shared Resource</h2>
+    <h3 id="resource">Free</h3>
+    <p id="active">No active processes</p>
+</div>
+
+<div class="panel">
+    <h2>Reader States</h2>
+    <div id="readers" class="grid"></div>
+</div>
+
+<div class="panel">
+    <h2>Writer States</h2>
+    <div id="writers" class="grid"></div>
+</div>
+
+<div class="panel">
+    <h2>Execution Timeline</h2>
+    <p id="counter"></p>
+    <input type="range" id="slider" min="0" value="0">
+    <p id="message"></p>
+
+    <button onclick="previous()">Previous</button>
+    <button onclick="next()">Next</button>
+    <button onclick="play()">Play</button>
+    <button onclick="pause()">Pause</button>
+</div>
+
+<div class="panel">
+    <h2>Complete Event Sequence</h2>
+    <div id="timeline"></div>
+</div>
+
+<script>
+const events = EVENT_DATA;
+let current = 0;
+let timer = null;
+
+const slider = document.getElementById("slider");
+slider.max = Math.max(0, events.length - 1);
+
+function showStates(id, states) {
+    const box = document.getElementById(id);
+    box.innerHTML = "";
+
+    Object.entries(states).forEach(([name, state]) => {
+        const card = document.createElement("div");
+        card.className = "process";
+
+        const title = document.createElement("strong");
+        title.textContent = name;
+
+        const badge = document.createElement("div");
+        badge.className = "status " + state;
+        badge.textContent = state;
+
+        card.append(title, badge);
+        box.appendChild(card);
+    });
+}
+
+function render(index) {
+    if (!events.length) return;
+
+    current = Math.max(0, Math.min(index, events.length - 1));
+    const e = events[current];
+
+    showStates("readers", e.readers);
+    showStates("writers", e.writers);
+
+    document.getElementById("resource").textContent = e.resource;
+
+    let active = [];
+
+    if (e.active_readers.length)
+        active.push("Reading: " + e.active_readers.join(", "));
+
+    if (e.active_writer)
+        active.push("Writing: " + e.active_writer);
+
+    document.getElementById("active").textContent =
+        active.length ? active.join(" | ") : "No active processes";
+
+    document.getElementById("counter").textContent =
+        "Event " + e.number + " of " + events.length;
+
+    document.getElementById("message").textContent = e.message;
+    slider.value = current;
+}
+
+function previous() {
+    pause();
+    render(current - 1);
+}
+
+function next() {
+    pause();
+    render(current + 1);
+}
+
+function play() {
+    pause();
+
+    timer = setInterval(() => {
+        if (current >= events.length - 1) {
+            pause();
+            return;
+        }
+
+        render(current + 1);
+    }, 900);
+}
+
+function pause() {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+}
+
+slider.addEventListener("input", () => {
+    pause();
+    render(Number(slider.value));
+});
+
+events.forEach(e => {
+    const item = document.createElement("div");
+    item.className = "event";
+
+    const title = document.createElement("strong");
+    title.textContent = "Event " + e.number;
+
+    const message = document.createElement("p");
+    message.textContent = e.message;
+
+    item.append(title, message);
+    document.getElementById("timeline").appendChild(item);
+});
+
+render(0);
+</script>
+
+</body>
+</html>
+""";
+
+        page = page.replace("EVENT_DATA", eventData);
+
+        try (FileWriter file = new FileWriter("simulation.html")) {
+            file.write(page);
+        }
+
+        System.out.println(
+                "\nHTML simulation generated successfully!"
+        );
+
+    }
+
+    // --------------------------------
+    // MAIN METHOD
+    // --------------------------------
+
+    public static void main(String[] args) {
+
+        ReadWriteMonitor monitor = new ReadWriteMonitor();
+
+        // Create three readers and two writers.
+        for (int i = 1; i <= 3; i++) {
+            monitor.addReader("R" + i);
+        }
+
+        for (int i = 1; i <= 2; i++) {
+            monitor.addWriter("W" + i);
+        }
+
+        List<Thread> threads = new ArrayList<>();
+
+        System.out.println(
+                "Starting Readers-Writers Monitor Simulation\n"
+        );
+
+        // Start reader threads.
+        for (int i = 1; i <= 3; i++) {
+
+            final String id = "R" + i;
+
+            threads.add(new Thread(() -> {
+                boolean entered = false;
+
+                try {
+                    monitor.startReading(id);
+                    entered = true;
+
+                    Thread.sleep(1000);
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+
+                } finally {
+                    if (entered) {
+                        monitor.finishReading(id);
+                    }
+                }
+            }));
+        }
+
+        // Start writer threads.
+        for (int i = 1; i <= 2; i++) {
+
+            final String id = "W" + i;
+
+            threads.add(new Thread(() -> {
+                boolean entered = false;
+
+                try {
+                    monitor.startWriting(id);
+                    entered = true;
+
+                    Thread.sleep(1500);
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+
+                } finally {
+                    if (entered) {
+                        monitor.finishWriting(id);
+                    }
+                }
+            }));
+        }
+
+        // Start all threads.
+        for (Thread thread : threads) {
+            thread.start();
+        }
+
+        // Wait for all threads to finish.
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.out.println("Main thread interrupted.");
+                return;
+            }
+        }
+        
+        try {
+        	generateHTML(monitor.getEventsJSON());
+        	} catch (IOException e) {
+        		System.out.println("Error generating HTML: " + e.getMessage());
+        		}
+
+        System.out.println("\nAll processes completed.");
+    }
+}
