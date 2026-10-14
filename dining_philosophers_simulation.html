@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dining Philosophers - Semaphore Simulation</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: #ffffff;
+    font-family: Arial, sans-serif;
+    color: #eeeeee;
+}
+
+.simulation {
+    width: min(100%, 900px);
+    margin: 25px auto;
+    padding: 12px;
+    background: #191d26;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 9px;
+    background: #242a36;
+    border-radius: 5px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+button, select {
+    color: #eeeeee;
+    background: #303747;
+    border: 1px solid #414a5c;
+    border-radius: 4px;
+    padding: 5px 9px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+button:hover { background: #46536b; }
+
+.speed-label {
+    font-size: 11px;
+    color: #eeeeee;
+}
+
+#timeline {
+    flex: 1;
+    min-width: 90px;
+    accent-color: #1685ff;
+}
+
+#counter {
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.table-panel {
+    width: min(100%, 430px);
+    margin: 0 auto;
+    background: #242a36;
+    border-radius: 6px;
+    padding: 6px;
+}
+
+svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.legend {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 10px 0 0;
+    color: #c4cbd7;
+    font-size: 10px;
+}
+
+.legend span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.swatch {
+    width: 7px;
+    height: 7px;
+    display: inline-block;
+}
+
+.event-line {
+    width: min(100%, 430px);
+    margin: 10px auto 0;
+    min-height: 25px;
+    color: #dce4f0;
+    font-size: 11px;
+    text-align: center;
+}
+
+@media (max-width: 500px) {
+    .simulation { margin: 0; padding: 8px; }
+    .table-panel { width: 100%; }
+    .toolbar { gap: 5px; }
+    button, select { padding: 5px 6px; }
+}
+</style>
+</head>
+
+<body>
+<div class="simulation">
+
+    <div class="toolbar">
+        <button id="play">Pause</button>
+        <button id="step">Step &gt;</button>
+        <button id="reset">Reset</button>
+
+        <span class="speed-label">Speed</span>
+
+        <select id="speed">
+            <option value="1000">0.5x</option>
+            <option value="650" selected>1x</option>
+            <option value="300">2x</option>
+        </select>
+
+        <input id="timeline" type="range" min="0" max="0" value="0">
+        <span id="counter">1 / 1</span>
+    </div>
+
+    <div class="table-panel">
+        <svg id="table" viewBox="0 0 430 430"
+             aria-label="Dining philosophers table"></svg>
+    </div>
+
+    <div class="legend">
+        <span><i class="swatch" style="background:#c39200"></i>HUNGRY</span>
+        <span><i class="swatch" style="background:#28aaa3"></i>EATING</span>
+        <span><i class="swatch" style="background:#758195"></i>THINKING</span>
+        <span><i class="swatch" style="background:#d6a16c"></i>FORK FREE</span>
+    </div>
+
+    <div class="event-line" id="eventText">
+        Ready to begin simulation
+    </div>
+
+</div>
+
+<script>
+const events = [{"step": 1, "time": 0.0, "event": "START", "philosopher": null, "message": "Simulation started with four philosophers and four forks", "states": ["Thinking", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 2, "time": 0.0, "event": "THINKING", "philosopher": 0, "message": "P0 is thinking", "states": ["Thinking", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 3, "time": 0.031, "event": "THINKING", "philosopher": 1, "message": "P1 is thinking", "states": ["Thinking", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 4, "time": 0.062, "event": "THINKING", "philosopher": 2, "message": "P2 is thinking", "states": ["Thinking", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 5, "time": 0.094, "event": "THINKING", "philosopher": 3, "message": "P3 is thinking", "states": ["Thinking", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 6, "time": 0.156, "event": "HUNGRY", "philosopher": 0, "message": "P0 is hungry", "states": ["Hungry", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 7, "time": 0.156, "event": "WAITING", "philosopher": 0, "message": "P0 joins the waiting queue", "states": ["Hungry", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 8, "time": 0.156, "event": "ACQUIRING", "philosopher": 0, "message": "P0 is acquiring forks", "states": ["Acquiring", "Thinking", "Thinking", "Thinking"], "forks": [null, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 9, "time": 0.156, "event": "FORK_ACQUIRED", "philosopher": 0, "message": "P0 picks up F0", "states": ["Acquiring", "Thinking", "Thinking", "Thinking"], "forks": [0, null, null, null], "meals": [0, 0, 0, 0]}, {"step": 10, "time": 0.203, "event": "FORK_ACQUIRED", "philosopher": 0, "message": "P0 picks up F1", "states": ["Acquiring", "Thinking", "Thinking", "Thinking"], "forks": [0, 0, null, null], "meals": [0, 0, 0, 0]}, {"step": 11, "time": 0.203, "event": "EATING", "philosopher": 0, "message": "P0 is eating", "states": ["Eating", "Thinking", "Thinking", "Thinking"], "forks": [0, 0, null, null], "meals": [0, 0, 0, 0]}, {"step": 12, "time": 0.25, "event": "HUNGRY", "philosopher": 2, "message": "P2 is hungry", "states": ["Eating", "Thinking", "Hungry", "Thinking"], "forks": [0, 0, null, null], "meals": [0, 0, 0, 0]}, {"step": 13, "time": 0.25, "event": "WAITING", "philosopher": 2, "message": "P2 joins the waiting queue", "states": ["Eating", "Thinking", "Hungry", "Thinking"], "forks": [0, 0, null, null], "meals": [0, 0, 0, 0]}, {"step": 14, "time": 0.25, "event": "ACQUIRING", "philosopher": 2, "message": "P2 is acquiring forks", "states": ["Eating", "Thinking", "Acquiring", "Thinking"], "forks": [0, 0, null, null], "meals": [0, 0, 0, 0]}, {"step": 15, "time": 0.25, "event": "FORK_ACQUIRED", "philosopher": 2, "message": "P2 picks up F2", "states": ["Eating", "Thinking", "Acquiring", "Thinking"], "forks": [0, 0, 2, null], "meals": [0, 0, 0, 0]}, {"step": 16, "time": 0.25, "event": "HUNGRY", "philosopher": 1, "message": "P1 is hungry", "states": ["Eating", "Hungry", "Acquiring", "Thinking"], "forks": [0, 0, 2, null], "meals": [0, 0, 0, 0]}, {"step": 17, "time": 0.25, "event": "WAITING", "philosopher": 1, "message": "P1 joins the waiting queue", "states": ["Eating", "Hungry", "Acquiring", "Thinking"], "forks": [0, 0, 2, null], "meals": [0, 0, 0, 0]}, {"step": 18, "time": 0.25, "event": "ACQUIRING", "philosopher": 1, "message": "P1 is acquiring forks", "states": ["Eating", "Acquiring", "Acquiring", "Thinking"], "forks": [0, 0, 2, null], "meals": [0, 0, 0, 0]}, {"step": 19, "time": 0.297, "event": "FORK_ACQUIRED", "philosopher": 2, "message": "P2 picks up F3", "states": ["Eating", "Acquiring", "Acquiring", "Thinking"], "forks": [0, 0, 2, 2], "meals": [0, 0, 0, 0]}, {"step": 20, "time": 0.297, "event": "EATING", "philosopher": 2, "message": "P2 is eating", "states": ["Eating", "Acquiring", "Eating", "Thinking"], "forks": [0, 0, 2, 2], "meals": [0, 0, 0, 0]}, {"step": 21, "time": 0.328, "event": "HUNGRY", "philosopher": 3, "message": "P3 is hungry", "states": ["Eating", "Acquiring", "Eating", "Hungry"], "forks": [0, 0, 2, 2], "meals": [0, 0, 0, 0]}, {"step": 22, "time": 0.328, "event": "WAITING", "philosopher": 3, "message": "P3 joins the waiting queue", "states": ["Eating", "Acquiring", "Eating", "Hungry"], "forks": [0, 0, 2, 2], "meals": [0, 0, 0, 0]}, {"step": 23, "time": 0.562, "event": "MEAL_DONE", "philosopher": 0, "message": "P0 finished eating", "states": ["Eating", "Acquiring", "Eating", "Hungry"], "forks": [0, 0, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 24, "time": 0.562, "event": "RELEASING", "philosopher": 0, "message": "P0 is releasing forks", "states": ["Releasing", "Acquiring", "Eating", "Hungry"], "forks": [0, 0, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 25, "time": 0.562, "event": "FORK_RELEASED", "philosopher": 0, "message": "P0 puts down F1", "states": ["Releasing", "Acquiring", "Eating", "Hungry"], "forks": [0, null, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 26, "time": 0.562, "event": "FORK_RELEASED", "philosopher": 0, "message": "P0 puts down F0", "states": ["Releasing", "Acquiring", "Eating", "Hungry"], "forks": [null, null, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 27, "time": 0.562, "event": "THINKING", "philosopher": 0, "message": "P0 returns to thinking", "states": ["Thinking", "Acquiring", "Eating", "Hungry"], "forks": [null, null, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 28, "time": 0.562, "event": "FINISHED", "philosopher": 0, "message": "P0 has finished", "states": ["Finished", "Acquiring", "Eating", "Hungry"], "forks": [null, null, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 29, "time": 0.562, "event": "ACQUIRING", "philosopher": 3, "message": "P3 is acquiring forks", "states": ["Finished", "Acquiring", "Eating", "Acquiring"], "forks": [null, null, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 30, "time": 0.562, "event": "FORK_ACQUIRED", "philosopher": 3, "message": "P3 picks up F0", "states": ["Finished", "Acquiring", "Eating", "Acquiring"], "forks": [3, null, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 31, "time": 0.562, "event": "FORK_ACQUIRED", "philosopher": 1, "message": "P1 picks up F1", "states": ["Finished", "Acquiring", "Eating", "Acquiring"], "forks": [3, 1, 2, 2], "meals": [1, 0, 0, 0]}, {"step": 32, "time": 0.594, "event": "MEAL_DONE", "philosopher": 2, "message": "P2 finished eating", "states": ["Finished", "Acquiring", "Eating", "Acquiring"], "forks": [3, 1, 2, 2], "meals": [1, 0, 1, 0]}, {"step": 33, "time": 0.594, "event": "RELEASING", "philosopher": 2, "message": "P2 is releasing forks", "states": ["Finished", "Acquiring", "Releasing", "Acquiring"], "forks": [3, 1, 2, 2], "meals": [1, 0, 1, 0]}, {"step": 34, "time": 0.594, "event": "FORK_RELEASED", "philosopher": 2, "message": "P2 puts down F3", "states": ["Finished", "Acquiring", "Releasing", "Acquiring"], "forks": [3, 1, 2, null], "meals": [1, 0, 1, 0]}, {"step": 35, "time": 0.594, "event": "FORK_RELEASED", "philosopher": 2, "message": "P2 puts down F2", "states": ["Finished", "Acquiring", "Releasing", "Acquiring"], "forks": [3, 1, null, null], "meals": [1, 0, 1, 0]}, {"step": 36, "time": 0.594, "event": "THINKING", "philosopher": 2, "message": "P2 returns to thinking", "states": ["Finished", "Acquiring", "Thinking", "Acquiring"], "forks": [3, 1, null, null], "meals": [1, 0, 1, 0]}, {"step": 37, "time": 0.594, "event": "FINISHED", "philosopher": 2, "message": "P2 has finished", "states": ["Finished", "Acquiring", "Finished", "Acquiring"], "forks": [3, 1, null, null], "meals": [1, 0, 1, 0]}, {"step": 38, "time": 0.609, "event": "FORK_ACQUIRED", "philosopher": 3, "message": "P3 picks up F3", "states": ["Finished", "Acquiring", "Finished", "Acquiring"], "forks": [3, 1, null, 3], "meals": [1, 0, 1, 0]}, {"step": 39, "time": 0.609, "event": "EATING", "philosopher": 3, "message": "P3 is eating", "states": ["Finished", "Acquiring", "Finished", "Eating"], "forks": [3, 1, null, 3], "meals": [1, 0, 1, 0]}, {"step": 40, "time": 0.609, "event": "FORK_ACQUIRED", "philosopher": 1, "message": "P1 picks up F2", "states": ["Finished", "Acquiring", "Finished", "Eating"], "forks": [3, 1, 1, 3], "meals": [1, 0, 1, 0]}, {"step": 41, "time": 0.609, "event": "EATING", "philosopher": 1, "message": "P1 is eating", "states": ["Finished", "Eating", "Finished", "Eating"], "forks": [3, 1, 1, 3], "meals": [1, 0, 1, 0]}, {"step": 42, "time": 0.922, "event": "MEAL_DONE", "philosopher": 1, "message": "P1 finished eating", "states": ["Finished", "Eating", "Finished", "Eating"], "forks": [3, 1, 1, 3], "meals": [1, 1, 1, 0]}, {"step": 43, "time": 0.922, "event": "RELEASING", "philosopher": 1, "message": "P1 is releasing forks", "states": ["Finished", "Releasing", "Finished", "Eating"], "forks": [3, 1, 1, 3], "meals": [1, 1, 1, 0]}, {"step": 44, "time": 0.922, "event": "FORK_RELEASED", "philosopher": 1, "message": "P1 puts down F2", "states": ["Finished", "Releasing", "Finished", "Eating"], "forks": [3, 1, null, 3], "meals": [1, 1, 1, 0]}, {"step": 45, "time": 0.922, "event": "FORK_RELEASED", "philosopher": 1, "message": "P1 puts down F1", "states": ["Finished", "Releasing", "Finished", "Eating"], "forks": [3, null, null, 3], "meals": [1, 1, 1, 0]}, {"step": 46, "time": 0.922, "event": "THINKING", "philosopher": 1, "message": "P1 returns to thinking", "states": ["Finished", "Thinking", "Finished", "Eating"], "forks": [3, null, null, 3], "meals": [1, 1, 1, 0]}, {"step": 47, "time": 0.922, "event": "FINISHED", "philosopher": 1, "message": "P1 has finished", "states": ["Finished", "Finished", "Finished", "Eating"], "forks": [3, null, null, 3], "meals": [1, 1, 1, 0]}, {"step": 48, "time": 1.062, "event": "MEAL_DONE", "philosopher": 3, "message": "P3 finished eating", "states": ["Finished", "Finished", "Finished", "Eating"], "forks": [3, null, null, 3], "meals": [1, 1, 1, 1]}, {"step": 49, "time": 1.062, "event": "RELEASING", "philosopher": 3, "message": "P3 is releasing forks", "states": ["Finished", "Finished", "Finished", "Releasing"], "forks": [3, null, null, 3], "meals": [1, 1, 1, 1]}, {"step": 50, "time": 1.062, "event": "FORK_RELEASED", "philosopher": 3, "message": "P3 puts down F3", "states": ["Finished", "Finished", "Finished", "Releasing"], "forks": [3, null, null, null], "meals": [1, 1, 1, 1]}, {"step": 51, "time": 1.062, "event": "FORK_RELEASED", "philosopher": 3, "message": "P3 puts down F0", "states": ["Finished", "Finished", "Finished", "Releasing"], "forks": [null, null, null, null], "meals": [1, 1, 1, 1]}, {"step": 52, "time": 1.062, "event": "THINKING", "philosopher": 3, "message": "P3 returns to thinking", "states": ["Finished", "Finished", "Finished", "Thinking"], "forks": [null, null, null, null], "meals": [1, 1, 1, 1]}, {"step": 53, "time": 1.062, "event": "FINISHED", "philosopher": 3, "message": "P3 has finished", "states": ["Finished", "Finished", "Finished", "Finished"], "forks": [null, null, null, null], "meals": [1, 1, 1, 1]}, {"step": 54, "time": 1.062, "event": "COMPLETE", "philosopher": null, "message": "All four philosophers finished eating", "states": ["Finished", "Finished", "Finished", "Finished"], "forks": [null, null, null, null], "meals": [1, 1, 1, 1]}];
+const NS = "http://www.w3.org/2000/svg";
+
+const svg = document.getElementById("table");
+const timeline = document.getElementById("timeline");
+const counter = document.getElementById("counter");
+const eventText = document.getElementById("eventText");
+
+timeline.max = events.length - 1;
+
+let index = 0;
+let timer = null;
+let playing = true;
+
+const stateColors = {
+    Thinking: "#758195",
+    Hungry: "#c39200",
+    Acquiring: "#258fbb",
+    Eating: "#28aaa3",
+    Releasing: "#258fbb",
+    Finished: "#687587"
+};
+
+function element(tag, attributes, text) {
+    const node = document.createElementNS(NS, tag);
+
+    for (const [key, value] of Object.entries(attributes || {})) {
+        node.setAttribute(key, value);
+    }
+
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
+
+function position(cx, cy, radius, angle) {
+    return [
+        cx + radius * Math.cos(angle),
+        cy + radius * Math.sin(angle)
+    ];
+}
+
+function draw(event) {
+    svg.innerHTML = "";
+
+    const cx = 215;
+    const cy = 215;
+    const forkRadius = 105;
+    const philosopherRadius = 151;
+
+    // Table ring
+    svg.appendChild(element("circle", {
+        cx, cy, r: 82,
+        fill: "#202631",
+        stroke: "#465062",
+        "stroke-width": 1,
+        "stroke-dasharray": "2 3"
+    }));
+
+    // Table center
+    svg.appendChild(element("circle", {
+        cx, cy, r: 48,
+        fill: "#242a36"
+    }));
+
+    svg.appendChild(element("text", {
+        x: cx, y: cy - 5,
+        fill: "#cdd6e4",
+        "font-size": 11,
+        "text-anchor": "middle",
+        "font-weight": "bold"
+    }, "DINING"));
+
+    svg.appendChild(element("text", {
+        x: cx, y: cy + 10,
+        fill: "#8e9aaf",
+        "font-size": 9,
+        "text-anchor": "middle"
+    }, "TABLE"));
+
+    // Draw forks between adjacent philosophers.
+    for (let i = 0; i < 4; i++) {
+        const angle = -Math.PI / 2 + i * Math.PI / 2 + Math.PI / 4;
+        const [x, y] = position(cx, cy, forkRadius, angle);
+        const owner = event.forks[i];
+        const color = owner === null ? "#d6a16c" : "#28aaa3";
+
+        svg.appendChild(element("line", {
+            x1: x - 9 * Math.cos(angle),
+            y1: y - 9 * Math.sin(angle),
+            x2: x + 9 * Math.cos(angle),
+            y2: y + 9 * Math.sin(angle),
+            stroke: color,
+            "stroke-width": 15,
+            "stroke-linecap": "round",
+            opacity: 0.95
+        }));
+
+        svg.appendChild(element("rect", {
+            x: x - 15,
+            y: y - 10,
+            width: 30,
+            height: 20,
+            rx: 9,
+            fill: color,
+            stroke: "#ffffff70",
+            "stroke-width": 1,
+            transform: `rotate(${angle * 180 / Math.PI},${x},${y})`
+        }));
+
+        svg.appendChild(element("text", {
+            x, y: y + 3,
+            fill: "#ffffff",
+            "font-size": 9,
+            "font-weight": "bold",
+            "text-anchor": "middle"
+        }, `F${i}`));
+
+        svg.appendChild(element("text", {
+            x, y: y + 23,
+            fill: owner === null ? "#e0b98f" : "#60e7d8",
+            "font-size": 8,
+            "text-anchor": "middle"
+        }, owner === null ? "FREE" : `P${owner}`));
+    }
+
+    // Draw philosophers around the table.
+    for (let i = 0; i < 4; i++) {
+        const angle = -Math.PI / 2 + i * Math.PI / 2;
+        const [x, y] = position(cx, cy, philosopherRadius, angle);
+        const state = event.states[i];
+
+        svg.appendChild(element("circle", {
+            cx: x, cy: y, r: 28,
+            fill: stateColors[state] || "#758195",
+            stroke: "#ffffff35",
+            "stroke-width": 1.5
+        }));
+
+        svg.appendChild(element("text", {
+            x, y: y - 2,
+            fill: "#ffffff",
+            "font-size": 13,
+            "font-weight": "bold",
+            "text-anchor": "middle"
+        }, `P${i}`));
+
+        svg.appendChild(element("text", {
+            x, y: y + 10,
+            fill: "#ffffff",
+            "font-size": 6.5,
+            "font-weight": "bold",
+            "text-anchor": "middle"
+        }, state.toUpperCase()));
+
+        svg.appendChild(element("text", {
+            x, y: y + 40,
+            fill: "#c1cada",
+            "font-size": 8,
+            "text-anchor": "middle"
+        }, `${event.meals[i]}/${1} MEAL`));
+    }
+}
+
+function showStep(step) {
+    index = Math.max(0, Math.min(events.length - 1, step));
+
+    const event = events[index];
+
+    timeline.value = index;
+    counter.textContent = `${index + 1} / ${events.length}`;
+
+    eventText.textContent =
+        `#${event.step}  |  ${event.event.replaceAll("_", " ")}  |  ${event.message}`;
+
+    draw(event);
+}
+
+function stop() {
+    if (timer !== null) {
+        clearTimeout(timer);
+    }
+
+    timer = null;
+    playing = false;
+    document.getElementById("play").textContent = "Play";
+}
+
+function advance() {
+    if (!playing) return;
+
+    if (index >= events.length - 1) {
+        stop();
+        return;
+    }
+
+    showStep(index + 1);
+
+    timer = setTimeout(() => {
+        timer = null;
+        advance();
+    }, Number(document.getElementById("speed").value));
+}
+
+document.getElementById("play").onclick = () => {
+    if (playing) {
+        stop();
+    } else {
+        if (index >= events.length - 1) showStep(0);
+
+        playing = true;
+        document.getElementById("play").textContent = "Pause";
+        advance();
+    }
+};
+
+document.getElementById("step").onclick = () => {
+    stop();
+    showStep(index + 1);
+};
+
+document.getElementById("reset").onclick = () => {
+    stop();
+    showStep(0);
+};
+
+timeline.oninput = () => {
+    stop();
+    showStep(Number(timeline.value));
+};
+
+showStep(0);
+</script>
+</body>
+</html>
