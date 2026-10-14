@@ -135,13 +135,11 @@ Open the image files on GitHub to view the screenshots. Make sure they represent
 - Deadlock prevention and starvation depend on the synchronization logic; these properties should be checked through testing.
 - The exact output depends on the implementation and the order in which threads are scheduled.
 
-## 10. AI Tools Used and Prompt Log
+## 10. AI Tools Used 
 
 **AI tool:** ChatGPT by OpenAI.
 
 AI assistance was used for help with understanding synchronization concepts, implementation, debugging, and documentation, where applicable. The code should be reviewed and tested to ensure that the student understands how it works.
-
-**Prompt log:** Add the URL to the prompt log submitted with the assignment, if a separate prompt log is required.
 
 ## 11. References and Acknowledgements
 
