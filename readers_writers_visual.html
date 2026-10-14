@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Readers and Writers - Semaphore Lab</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f1f3f9;
+    color: #202942;
+    margin: 0 auto;
+    padding: 16px 24px;
+    max-width: 1200px;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 14px;
+}
+
+h1 {
+    font-size: 24px;
+    margin: 6px 0;
+}
+
+.subtitle {
+    color: #707b90;
+    font-size: 13px;
+    margin: 6px;
+}
+
+.toolbar {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin: 12px;
+}
+
+button {
+    padding: 8px 14px;
+    border: none;
+    border-radius: 6px;
+    background: #26785e;
+    color: white;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button.secondary {
+    background: #dfe5ef;
+    color: #25304a;
+}
+
+.summary {
+    text-align: center;
+    margin: 12px;
+    font-size: 15px;
+    font-weight: bold;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 13px;
+}
+
+.panel {
+    background: white;
+    border: 1px solid #e1e5ee;
+    border-radius: 9px;
+    padding: 13px;
+    min-height: 190px;
+    box-shadow: 0 3px 10px #24334b0a;
+}
+
+.panel h2 {
+    text-align: center;
+    font-size: 14px;
+    margin: 4px 0 12px;
+    padding-bottom: 9px;
+    border-bottom: 2px solid #d9dce4;
+}
+
+#critical {
+    border: 2px solid #e6ad30;
+}
+
+.processes {
+    display: flex;
+    justify-content: center;
+    align-content: flex-start;
+    flex-wrap: wrap;
+    gap: 7px;
+    min-height: 125px;
+}
+
+.process {
+    color: white;
+    background: #2868b2;
+    border-radius: 5px;
+    padding: 7px 9px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.process.writer {
+    background: #d9534f;
+}
+
+.empty {
+    padding-top: 32px;
+    font-size: 12px;
+    color: #929bad;
+}
+
+.log-panel {
+    margin-top: 14px;
+    padding: 13px;
+    background: white;
+    border: 1px solid #e1e5ee;
+    border-radius: 9px;
+}
+
+.log-panel h2 {
+    font-size: 14px;
+    margin: 0 0 9px;
+}
+
+#log {
+    height: 145px;
+    overflow-y: auto;
+    padding: 9px;
+    border: 1px solid #e1e5ee;
+    background: #fafbfe;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.controls {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 11px;
+    flex-wrap: wrap;
+    font-size: 12px;
+}
+
+input[type=range] {
+    flex: 1;
+    min-width: 100px;
+}
+
+.current {
+    background: #edf3ff;
+    padding: 10px;
+    border-radius: 6px;
+    margin-top: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.legend {
+    font-size: 11px;
+    color: #707b90;
+    margin: 8px 0 0;
+}
+
+@media (max-width: 650px) {
+    body {
+        padding: 12px;
+    }
+
+    .layout {
+        grid-template-columns: 1fr;
+    }
+
+    .panel {
+        min-height: 150px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <h1>Readers and Writers Synchronization</h1>
+    <p class="subtitle">
+        Semaphore-based concurrency demonstration
+    </p>
+
+    <div class="toolbar">
+        <button id="play">Start Simulation</button>
+        <button id="reset" class="secondary">Reset</button>
+    </div>
+
+    <div class="summary">
+        Shared Data: <span id="data">0</span>
+        &nbsp; | &nbsp;
+        Active Readers: <span id="count">0</span>
+    </div>
+</header>
+
+<div class="layout">
+
+    <section class="panel">
+        <h2>Waiting Room</h2>
+        <div id="waitingList" class="processes"></div>
+    </section>
+
+    <section class="panel" id="critical">
+        <h2>Critical Section</h2>
+        <div id="activeList" class="processes"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Finished</h2>
+        <div id="finishedList" class="processes"></div>
+    </section>
+
+</div>
+
+<section class="log-panel">
+    <h2>Execution Log</h2>
+    <div id="log"></div>
+
+    <div class="controls">
+        <button id="previous" class="secondary">Previous</button>
+
+        <label for="slider">Timeline</label>
+        <input id="slider" type="range" min="0" value="0">
+
+        <span id="counter"></span>
+
+        <button id="next" class="secondary">Next</button>
+    </div>
+
+    <div id="current" class="current">
+        Press Start Simulation to replay the recorded events.
+    </div>
+</section>
+
+<script>
+const events = [{"n": 1, "time": 0.0, "action": "START", "actor": "SYSTEM", "message": "Launching reader and writer processes", "activeReaders": [], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "AVAILABLE"}, {"n": 2, "time": 0.001, "action": "ARRIVAL", "actor": "Reader 1", "message": "Reader arrived", "activeReaders": [], "waitingReaders": ["Reader 1"], "waitingWriters": [], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "AVAILABLE"}, {"n": 3, "time": 0.001, "action": "WAITING", "actor": "Reader 1", "message": "Waiting for shared resource", "activeReaders": [], "waitingReaders": ["Reader 1"], "waitingWriters": [], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "AVAILABLE"}, {"n": 4, "time": 0.001, "action": "ENTER_READ", "actor": "Reader 1", "message": "Entered reading critical section", "activeReaders": ["Reader 1"], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 5, "time": 0.052, "action": "ARRIVAL", "actor": "Reader 2", "message": "Reader arrived", "activeReaders": ["Reader 1"], "waitingReaders": ["Reader 2"], "waitingWriters": [], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 6, "time": 0.052, "action": "ENTER_READ", "actor": "Reader 2", "message": "Entered reading critical section", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 7, "time": 0.122, "action": "ARRIVAL", "actor": "Writer 1", "message": "Writer arrived", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": [], "waitingWriters": ["Writer 1"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 8, "time": 0.122, "action": "WAITING", "actor": "Writer 1", "message": "Writer waiting for exclusive access", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": [], "waitingWriters": ["Writer 1"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 9, "time": 0.202, "action": "ARRIVAL", "actor": "Reader 3", "message": "Reader arrived", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": ["Reader 3"], "waitingWriters": ["Writer 1"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 10, "time": 0.302, "action": "ARRIVAL", "actor": "Writer 2", "message": "Writer arrived", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": ["Reader 3"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 11, "time": 0.382, "action": "ARRIVAL", "actor": "Reader 4", "message": "Reader arrived", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": ["Reader 3", "Reader 4"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 12, "time": 0.452, "action": "ARRIVAL", "actor": "Reader 5", "message": "Reader arrived", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 13, "time": 0.648, "action": "READ", "actor": "Reader 2", "message": "Read shared data: 0", "activeReaders": ["Reader 1", "Reader 2"], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 14, "time": 0.648, "action": "EXIT_READ", "actor": "Reader 2", "message": "Exited reading section", "activeReaders": ["Reader 1"], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": [], "sharedData": 0, "resourceState": "READING"}, {"n": 15, "time": 0.648, "action": "FINISHED", "actor": "Reader 2", "message": "Reader finished", "activeReaders": ["Reader 1"], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": ["Reader 2"], "sharedData": 0, "resourceState": "READING"}, {"n": 16, "time": 0.755, "action": "READ", "actor": "Reader 1", "message": "Read shared data: 0", "activeReaders": ["Reader 1"], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": ["Reader 2"], "sharedData": 0, "resourceState": "READING"}, {"n": 17, "time": 0.755, "action": "EXIT_READ", "actor": "Reader 1", "message": "Exited reading section", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": ["Reader 2"], "sharedData": 0, "resourceState": "AVAILABLE"}, {"n": 18, "time": 0.755, "action": "RESOURCE_RELEASED", "actor": "Reader 1", "message": "Last reader released resource", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": ["Reader 2"], "sharedData": 0, "resourceState": "AVAILABLE"}, {"n": 19, "time": 0.755, "action": "FINISHED", "actor": "Reader 1", "message": "Reader finished", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 1", "Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2"], "sharedData": 0, "resourceState": "AVAILABLE"}, {"n": 20, "time": 0.755, "action": "ENTER_WRITE", "actor": "Writer 1", "message": "Entered exclusive writing section", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": "Writer 1", "finished": ["Reader 1", "Reader 2"], "sharedData": 0, "resourceState": "WRITING"}, {"n": 21, "time": 0.755, "action": "WAITING", "actor": "Reader 3", "message": "Waiting for shared resource", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": "Writer 1", "finished": ["Reader 1", "Reader 2"], "sharedData": 0, "resourceState": "WRITING"}, {"n": 22, "time": 0.755, "action": "WAITING", "actor": "Writer 2", "message": "Writer waiting for exclusive access", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": "Writer 1", "finished": ["Reader 1", "Reader 2"], "sharedData": 0, "resourceState": "WRITING"}, {"n": 23, "time": 1.284, "action": "WRITE", "actor": "Writer 1", "message": "Updated shared data to 10", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": "Writer 1", "finished": ["Reader 1", "Reader 2"], "sharedData": 10, "resourceState": "WRITING"}, {"n": 24, "time": 1.284, "action": "EXIT_WRITE", "actor": "Writer 1", "message": "Exited writing section", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2"], "sharedData": 10, "resourceState": "AVAILABLE"}, {"n": 25, "time": 1.284, "action": "RESOURCE_RELEASED", "actor": "Writer 1", "message": "Writer released shared resource", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2"], "sharedData": 10, "resourceState": "AVAILABLE"}, {"n": 26, "time": 1.284, "action": "FINISHED", "actor": "Writer 1", "message": "Writer finished", "activeReaders": [], "waitingReaders": ["Reader 3", "Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Writer 1"], "sharedData": 10, "resourceState": "AVAILABLE"}, {"n": 27, "time": 1.285, "action": "ENTER_READ", "actor": "Reader 3", "message": "Entered reading critical section", "activeReaders": ["Reader 3"], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Writer 1"], "sharedData": 10, "resourceState": "READING"}, {"n": 28, "time": 1.828, "action": "READ", "actor": "Reader 3", "message": "Read shared data: 10", "activeReaders": ["Reader 3"], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Writer 1"], "sharedData": 10, "resourceState": "READING"}, {"n": 29, "time": 1.828, "action": "EXIT_READ", "actor": "Reader 3", "message": "Exited reading section", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Writer 1"], "sharedData": 10, "resourceState": "AVAILABLE"}, {"n": 30, "time": 1.828, "action": "RESOURCE_RELEASED", "actor": "Reader 3", "message": "Last reader released resource", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Writer 1"], "sharedData": 10, "resourceState": "AVAILABLE"}, {"n": 31, "time": 1.828, "action": "FINISHED", "actor": "Reader 3", "message": "Reader finished", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": ["Writer 2"], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1"], "sharedData": 10, "resourceState": "AVAILABLE"}, {"n": 32, "time": 1.828, "action": "ENTER_WRITE", "actor": "Writer 2", "message": "Entered exclusive writing section", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": [], "activeWriter": "Writer 2", "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1"], "sharedData": 10, "resourceState": "WRITING"}, {"n": 33, "time": 1.828, "action": "WAITING", "actor": "Reader 4", "message": "Waiting for shared resource", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": [], "activeWriter": "Writer 2", "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1"], "sharedData": 10, "resourceState": "WRITING"}, {"n": 34, "time": 2.675, "action": "WRITE", "actor": "Writer 2", "message": "Updated shared data to 20", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": [], "activeWriter": "Writer 2", "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1"], "sharedData": 20, "resourceState": "WRITING"}, {"n": 35, "time": 2.675, "action": "EXIT_WRITE", "actor": "Writer 2", "message": "Exited writing section", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1"], "sharedData": 20, "resourceState": "AVAILABLE"}, {"n": 36, "time": 2.675, "action": "RESOURCE_RELEASED", "actor": "Writer 2", "message": "Writer released shared resource", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1"], "sharedData": 20, "resourceState": "AVAILABLE"}, {"n": 37, "time": 2.675, "action": "FINISHED", "actor": "Writer 2", "message": "Writer finished", "activeReaders": [], "waitingReaders": ["Reader 4", "Reader 5"], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "AVAILABLE"}, {"n": 38, "time": 2.676, "action": "ENTER_READ", "actor": "Reader 4", "message": "Entered reading critical section", "activeReaders": ["Reader 4"], "waitingReaders": ["Reader 5"], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "READING"}, {"n": 39, "time": 2.676, "action": "ENTER_READ", "actor": "Reader 5", "message": "Entered reading critical section", "activeReaders": ["Reader 4", "Reader 5"], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "READING"}, {"n": 40, "time": 3.294, "action": "READ", "actor": "Reader 4", "message": "Read shared data: 20", "activeReaders": ["Reader 4", "Reader 5"], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "READING"}, {"n": 41, "time": 3.294, "action": "EXIT_READ", "actor": "Reader 4", "message": "Exited reading section", "activeReaders": ["Reader 5"], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "READING"}, {"n": 42, "time": 3.294, "action": "FINISHED", "actor": "Reader 4", "message": "Reader finished", "activeReaders": ["Reader 5"], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Reader 4", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "READING"}, {"n": 43, "time": 3.317, "action": "READ", "actor": "Reader 5", "message": "Read shared data: 20", "activeReaders": ["Reader 5"], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Reader 4", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "READING"}, {"n": 44, "time": 3.317, "action": "EXIT_READ", "actor": "Reader 5", "message": "Exited reading section", "activeReaders": [], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Reader 4", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "AVAILABLE"}, {"n": 45, "time": 3.317, "action": "RESOURCE_RELEASED", "actor": "Reader 5", "message": "Last reader released resource", "activeReaders": [], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Reader 4", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "AVAILABLE"}, {"n": 46, "time": 3.317, "action": "FINISHED", "actor": "Reader 5", "message": "Reader finished", "activeReaders": [], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Reader 4", "Reader 5", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "AVAILABLE"}, {"n": 47, "time": 3.317, "action": "COMPLETE", "actor": "SYSTEM", "message": "All processes completed", "activeReaders": [], "waitingReaders": [], "waitingWriters": [], "activeWriter": null, "finished": ["Reader 1", "Reader 2", "Reader 3", "Reader 4", "Reader 5", "Writer 1", "Writer 2"], "sharedData": 20, "resourceState": "AVAILABLE"}];
+
+let index = 0;
+let timer = null;
+
+const el = id => document.getElementById(id);
+
+function stopPlayback() {
+    if (timer !== null) {
+        clearInterval(timer);
+    }
+
+    timer = null;
+    el("play").textContent = "Start Simulation";
+}
+
+function chip(id) {
+    const cls = id.startsWith("Writer")
+        ? "process writer"
+        : "process";
+
+    return '<span class="' + cls + '">' + id + '</span>';
+}
+
+function render(position) {
+    if (!events.length) return;
+
+    index = Math.max(
+        0,
+        Math.min(events.length - 1, position)
+    );
+
+    const e = events[index];
+
+    el("slider").value = index;
+    el("counter").textContent =
+        (index + 1) + " / " + events.length;
+
+    el("data").textContent = e.sharedData;
+    el("count").textContent = e.activeReaders.length;
+
+    const active = [...e.activeReaders];
+
+    if (e.activeWriter) {
+        active.push(e.activeWriter);
+    }
+
+    const waiting = [
+        ...e.waitingReaders,
+        ...e.waitingWriters
+    ];
+
+    el("waitingList").innerHTML = waiting.length
+        ? waiting.map(chip).join("")
+        : '<span class="empty">No process waiting</span>';
+
+    el("activeList").innerHTML = active.length
+        ? active.map(chip).join("")
+        : '<span class="empty">Resource available</span>';
+
+    el("finishedList").innerHTML = e.finished.length
+        ? e.finished.map(chip).join("")
+        : '<span class="empty">No completed processes</span>';
+
+    el("current").textContent =
+        "Event " + e.n + " | " + e.actor + " | " +
+        e.action.replaceAll("_", " ") + " | " +
+        e.message + " | Resource: " + e.resourceState;
+
+    el("log").textContent = events
+        .slice(0, index + 1)
+        .map(event =>
+            "[" + event.time.toFixed(3) + "s] " +
+            event.actor + " - " +
+            event.action + ": " + event.message
+        )
+        .join("\n");
+
+    el("log").scrollTop = el("log").scrollHeight;
+}
+
+el("slider").max = Math.max(0, events.length - 1);
+
+el("slider").addEventListener("input", event => {
+    stopPlayback();
+    render(Number(event.target.value));
+});
+
+el("previous").onclick = () => {
+    stopPlayback();
+    render(index - 1);
+};
+
+el("next").onclick = () => {
+    stopPlayback();
+    render(index + 1);
+};
+
+el("play").onclick = () => {
+    if (timer !== null) {
+        stopPlayback();
+        return;
+    }
+
+    if (index >= events.length - 1) {
+        render(0);
+    }
+
+    el("play").textContent = "Pause";
+
+    timer = setInterval(() => {
+        if (index >= events.length - 1) {
+            stopPlayback();
+            return;
+        }
+
+        render(index + 1);
+    }, 650);
+};
+
+el("reset").onclick = () => {
+    stopPlayback();
+    render(0);
+};
+
+render(0);
+</script>
+
+</body>
+</html>
