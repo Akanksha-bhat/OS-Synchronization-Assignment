@@ -1,454 +1,666 @@
-package task2;
+import json
+import random
+import threading
+import time
+from pathlib import Path
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.Semaphore;
+# =====================================================
+# READERS-WRITERS SIMULATION USING SEMAPHORES
+# =====================================================
 
-public class ReadersWritersSemaphore {
+OUTPUT_FILE = Path(__file__).with_name("readers_writers_visual.html")
 
-    // Semaphores for synchronization
-    static Semaphore mutex = new Semaphore(1, true);
-    static Semaphore rwMutex = new Semaphore(1, true);
+# Semaphores
+turnstile = threading.Semaphore(1)
+resource = threading.Semaphore(1)
+count_mutex = threading.Semaphore(1)
 
-    // Number of readers currently reading
-    static int readCount = 0;
+# Shared variables
+reader_count = 0
+shared_data = 0
+active_readers = set()
+waiting_readers = set()
+waiting_writers = set()
+active_writer = None
+finished = set()
 
-    // Process states
-    static Map<String, String> readers = new LinkedHashMap<>();
-    static Map<String, String> writers = new LinkedHashMap<>();
+# Event recording
+events = []
+state_lock = threading.Lock()
+start_time = time.perf_counter()
 
-    // Shared resource activity
-    static Set<String> activeReaders = new TreeSet<>();
-    static String activeWriter = null;
 
-    // Stores actual execution events
-    static List<String> events = new ArrayList<>();
+# =====================================================
+# EVENT LOGGING
+# =====================================================
 
-    static final Object eventLock = new Object();
+def log_event(action, actor, message=""):
+    with state_lock:
+        assert not (active_writer and active_readers), (
+            "Synchronization violation detected"
+        )
 
-    // Record states and events
-    static void record(String message, String id,
-                       String state, String action) {
+        events.append({
+            "n": len(events) + 1,
+            "time": round(time.perf_counter() - start_time, 3),
+            "action": action,
+            "actor": actor,
+            "message": message,
+            "activeReaders": sorted(active_readers),
+            "waitingReaders": sorted(waiting_readers),
+            "waitingWriters": sorted(waiting_writers),
+            "activeWriter": active_writer,
+            "finished": sorted(finished),
+            "sharedData": shared_data,
+            "resourceState": (
+                "WRITING" if active_writer else
+                "READING" if active_readers else
+                "AVAILABLE"
+            )
+        })
 
-        synchronized (eventLock) {
 
-            if (id != null) {
-                if (id.startsWith("R")) {
-                    readers.put(id, state);
-                } else {
-                    writers.put(id, state);
-                }
-            }
+# =====================================================
+# READER FUNCTION
+# =====================================================
 
-            if ("reader_start".equals(action)) {
-                activeReaders.add(id);
-            } else if ("reader_end".equals(action)) {
-                activeReaders.remove(id);
-            } else if ("writer_start".equals(action)) {
-                activeWriter = id;
-            } else if ("writer_end".equals(action)) {
-                activeWriter = null;
-            }
+def reader(rid, delay):
+    global reader_count
 
-            String resource;
+    time.sleep(delay)
 
-            if (activeWriter != null) {
-                resource = "Being Written";
-            } else if (!activeReaders.isEmpty()) {
-                resource = "Being Read";
-            } else {
-                resource = "Free";
-            }
+    with state_lock:
+        waiting_readers.add(rid)
 
-            String event =
-                "{\"number\":" + (events.size() + 1)
-                + ",\"message\":" + json(message)
-                + ",\"readers\":" + jsonMap(readers)
-                + ",\"writers\":" + jsonMap(writers)
-                + ",\"active_readers\":" + jsonList(activeReaders)
-                + ",\"active_writer\":" + json(activeWriter)
-                + ",\"resource\":" + json(resource) + "}";
+    log_event("ARRIVAL", rid, "Reader arrived")
 
-            events.add(event);
+    # Pass through the writer-preference turnstile.
+    turnstile.acquire()
+    turnstile.release()
 
-            System.out.println(
-                "Event " + events.size() + ": " + message
-            );
-        }
-    }
+    count_mutex.acquire()
+    reader_count += 1
 
-    // Reader thread
-    static void reader(String id) {
+    # First reader locks the shared resource.
+    if reader_count == 1:
+        log_event("WAITING", rid, "Waiting for shared resource")
+        resource.acquire()
 
-        record(id + " is waiting to read",
-               id, "Waiting", null);
+    with state_lock:
+        waiting_readers.discard(rid)
+        active_readers.add(rid)
 
-        try {
-            mutex.acquire();
+    log_event(
+        "ENTER_READ",
+        rid,
+        "Entered reading critical section"
+    )
 
-            readCount++;
+    count_mutex.release()
 
-            // First reader locks the shared resource
-            if (readCount == 1) {
-                rwMutex.acquire();
-            }
+    # Simulate reading.
+    time.sleep(random.uniform(0.4, 0.8))
 
-            record(id + " entered the reading section",
-                   id, "Reading", "reader_start");
+    with state_lock:
+        value = shared_data
 
-            mutex.release();
+    log_event("READ", rid, f"Read shared data: {value}")
 
-            // Simulate reading
-            Thread.sleep(1000);
+    # Exit reading critical section.
+    count_mutex.acquire()
 
-            mutex.acquire();
+    with state_lock:
+        active_readers.discard(rid)
 
-            readCount--;
+    reader_count -= 1
 
-            record(id + " finished reading",
-                   id, "Finished", "reader_end");
+    log_event("EXIT_READ", rid, "Exited reading section")
 
-            // Last reader releases the resource
-            if (readCount == 0) {
-                rwMutex.release();
-            }
+    # Last reader releases the resource.
+    if reader_count == 0:
+        resource.release()
+        log_event(
+            "RESOURCE_RELEASED",
+            rid,
+            "Last reader released resource"
+        )
 
-            mutex.release();
+    count_mutex.release()
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally {
-            // Release mutex if an unexpected interruption
-            // occurred while acquiring rwMutex.
-            // Normal execution releases it above.
-        }
-    }
+    with state_lock:
+        finished.add(rid)
 
-    // Writer thread
-    static void writer(String id) {
+    log_event("FINISHED", rid, "Reader finished")
 
-        record(id + " is waiting to write",
-               id, "Waiting", null);
 
-        try {
-            rwMutex.acquire();
+# =====================================================
+# WRITER FUNCTION
+# =====================================================
 
-            record(id + " entered the writing section",
-                   id, "Writing", "writer_start");
+def writer(wid, delay):
+    global active_writer, shared_data
 
-            // Simulate writing
-            Thread.sleep(1500);
+    time.sleep(delay)
 
-            record(id + " finished writing",
-                   id, "Finished", "writer_end");
+    with state_lock:
+        waiting_writers.add(wid)
 
-            rwMutex.release();
+    log_event("ARRIVAL", wid, "Writer arrived")
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
+    # Block new readers while waiting for exclusive access.
+    turnstile.acquire()
 
-    // Convert text safely into JSON strings
-    static String json(String value) {
+    log_event(
+        "WAITING",
+        wid,
+        "Writer waiting for exclusive access"
+    )
 
-        if (value == null) {
-            return "null";
-        }
+    resource.acquire()
 
-        return "\"" + value
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t") + "\"";
-    }
+    with state_lock:
+        waiting_writers.discard(wid)
+        active_writer = wid
 
-    static String jsonMap(Map<String, String> map) {
+    log_event(
+        "ENTER_WRITE",
+        wid,
+        "Entered exclusive writing section"
+    )
 
-        StringJoiner result = new StringJoiner(",", "{", "}");
+    # Resource semaphore still protects the writer.
+    turnstile.release()
 
-        for (Map.Entry<String, String> entry : map.entrySet()) {
-            result.add(json(entry.getKey()) + ":"
-                       + json(entry.getValue()));
-        }
+    # Simulate writing.
+    time.sleep(random.uniform(0.5, 0.9))
 
-        return result.toString();
-    }
+    with state_lock:
+        shared_data += 10
+        value = shared_data
 
-    static String jsonList(Collection<String> values) {
+    log_event("WRITE", wid, f"Updated shared data to {value}")
 
-        StringJoiner result = new StringJoiner(",", "[", "]");
+    with state_lock:
+        active_writer = None
 
-        for (String value : values) {
-            result.add(json(value));
-        }
+    log_event("EXIT_WRITE", wid, "Exited writing section")
 
-        return result.toString();
-    }
+    resource.release()
 
-    // Generate HTML from recorded execution events
-    static void generateHTML() throws IOException {
+    log_event(
+        "RESOURCE_RELEASED",
+        wid,
+        "Writer released shared resource"
+    )
 
-        String eventData = "[" + String.join(",", events) + "]";
+    with state_lock:
+        finished.add(wid)
 
-        String html = """
-<!DOCTYPE html>
+    log_event("FINISHED", wid, "Writer finished")
+
+
+# =====================================================
+# HTML GENERATION
+# HTML is generated from the recorded execution events.
+# =====================================================
+
+def generate_html():
+
+    data = json.dumps(events)
+
+    html_template = r'''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Readers-Writers Simulation</title>
+<title>Readers and Writers - Semaphore Lab</title>
 
 <style>
+* {
+    box-sizing: border-box;
+}
+
 body {
     font-family: Arial, sans-serif;
-    background: #f2f6fc;
-    color: #243047;
-    padding: 20px;
+    background: #f1f3f9;
+    color: #202942;
+    margin: 0 auto;
+    padding: 16px 24px;
+    max-width: 1200px;
 }
-h1 { color: #234c83; }
-.panel {
-    background: white;
-    padding: 16px;
-    margin: 15px 0;
-    border-radius: 10px;
-    box-shadow: 0 2px 7px #0001;
+
+header {
+    text-align: center;
+    margin-bottom: 14px;
 }
-.grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+
+h1 {
+    font-size: 24px;
+    margin: 6px 0;
+}
+
+.subtitle {
+    color: #707b90;
+    font-size: 13px;
+    margin: 6px;
+}
+
+.toolbar {
+    display: flex;
+    justify-content: center;
     gap: 10px;
+    margin: 12px;
 }
-.process {
-    background: #edf1f7;
-    padding: 12px;
-    border-radius: 8px;
-}
-.status {
-    display: inline-block;
-    padding: 5px 8px;
-    margin-top: 8px;
-    border-radius: 12px;
-    background: #e5e7eb;
-}
-.Reading { background: #c8f7d2; }
-.Writing { background: #ffcaca; }
-.Waiting { background: #ffedb5; }
-.Finished { background: #dce5f0; }
+
 button {
-    background: #234c83;
+    padding: 8px 14px;
+    border: none;
+    border-radius: 6px;
+    background: #26785e;
     color: white;
-    border: 0;
-    padding: 10px 14px;
-    margin: 4px;
-    border-radius: 5px;
+    font-size: 13px;
+    font-weight: bold;
     cursor: pointer;
 }
-.event {
-    border-left: 4px solid #6595d6;
-    background: #f4f7ff;
-    padding: 10px;
-    margin: 8px 0;
+
+button.secondary {
+    background: #dfe5ef;
+    color: #25304a;
 }
-input { width: 100%; }
+
+.summary {
+    text-align: center;
+    margin: 12px;
+    font-size: 15px;
+    font-weight: bold;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 13px;
+}
+
+.panel {
+    background: white;
+    border: 1px solid #e1e5ee;
+    border-radius: 9px;
+    padding: 13px;
+    min-height: 190px;
+    box-shadow: 0 3px 10px #24334b0a;
+}
+
+.panel h2 {
+    text-align: center;
+    font-size: 14px;
+    margin: 4px 0 12px;
+    padding-bottom: 9px;
+    border-bottom: 2px solid #d9dce4;
+}
+
+#critical {
+    border: 2px solid #e6ad30;
+}
+
+.processes {
+    display: flex;
+    justify-content: center;
+    align-content: flex-start;
+    flex-wrap: wrap;
+    gap: 7px;
+    min-height: 125px;
+}
+
+.process {
+    color: white;
+    background: #2868b2;
+    border-radius: 5px;
+    padding: 7px 9px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.process.writer {
+    background: #d9534f;
+}
+
+.empty {
+    padding-top: 32px;
+    font-size: 12px;
+    color: #929bad;
+}
+
+.log-panel {
+    margin-top: 14px;
+    padding: 13px;
+    background: white;
+    border: 1px solid #e1e5ee;
+    border-radius: 9px;
+}
+
+.log-panel h2 {
+    font-size: 14px;
+    margin: 0 0 9px;
+}
+
+#log {
+    height: 145px;
+    overflow-y: auto;
+    padding: 9px;
+    border: 1px solid #e1e5ee;
+    background: #fafbfe;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.controls {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 11px;
+    flex-wrap: wrap;
+    font-size: 12px;
+}
+
+input[type=range] {
+    flex: 1;
+    min-width: 100px;
+}
+
+.current {
+    background: #edf3ff;
+    padding: 10px;
+    border-radius: 6px;
+    margin-top: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.legend {
+    font-size: 11px;
+    color: #707b90;
+    margin: 8px 0 0;
+}
+
+@media (max-width: 650px) {
+    body {
+        padding: 12px;
+    }
+
+    .layout {
+        grid-template-columns: 1fr;
+    }
+
+    .panel {
+        min-height: 150px;
+    }
+}
 </style>
 </head>
 
 <body>
-<h1>Readers-Writers Problem</h1>
-<p>Semaphore-based synchronization simulation</p>
 
-<div class="panel">
-<h2>Shared Resource</h2>
-<h3 id="resource">Free</h3>
-<p id="active">No active processes</p>
+<header>
+    <h1>Readers and Writers Synchronization</h1>
+    <p class="subtitle">
+        Semaphore-based concurrency demonstration
+    </p>
+
+    <div class="toolbar">
+        <button id="play">Start Simulation</button>
+        <button id="reset" class="secondary">Reset</button>
+    </div>
+
+    <div class="summary">
+        Shared Data: <span id="data">0</span>
+        &nbsp; | &nbsp;
+        Active Readers: <span id="count">0</span>
+    </div>
+</header>
+
+<div class="layout">
+
+    <section class="panel">
+        <h2>Waiting Room</h2>
+        <div id="waitingList" class="processes"></div>
+    </section>
+
+    <section class="panel" id="critical">
+        <h2>Critical Section</h2>
+        <div id="activeList" class="processes"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Finished</h2>
+        <div id="finishedList" class="processes"></div>
+    </section>
+
 </div>
 
-<div class="panel">
-<h2>Reader States</h2>
-<div id="readers" class="grid"></div>
-</div>
+<section class="log-panel">
+    <h2>Execution Log</h2>
+    <div id="log"></div>
 
-<div class="panel">
-<h2>Writer States</h2>
-<div id="writers" class="grid"></div>
-</div>
+    <div class="controls">
+        <button id="previous" class="secondary">Previous</button>
 
-<div class="panel">
-<h2>Event Timeline</h2>
-<p id="counter"></p>
-<input type="range" id="slider" min="0" value="0">
-<p id="message"></p>
-<button onclick="previous()">Previous</button>
-<button onclick="next()">Next</button>
-<button onclick="play()">Play</button>
-<button onclick="pause()">Pause</button>
-</div>
+        <label for="slider">Timeline</label>
+        <input id="slider" type="range" min="0" value="0">
 
-<div class="panel">
-<h2>Complete Execution Log</h2>
-<div id="timeline"></div>
-</div>
+        <span id="counter"></span>
+
+        <button id="next" class="secondary">Next</button>
+    </div>
+
+    <div id="current" class="current">
+        Press Start Simulation to replay the recorded events.
+    </div>
+</section>
 
 <script>
-const events = EVENT_DATA;
-let current = 0;
+const events = __EVENT_DATA__;
+
+let index = 0;
 let timer = null;
 
-const slider = document.getElementById("slider");
-slider.max = Math.max(0, events.length - 1);
+const el = id => document.getElementById(id);
 
-function showStates(id, states) {
-    const box = document.getElementById(id);
-    box.innerHTML = "";
+function stopPlayback() {
+    if (timer !== null) {
+        clearInterval(timer);
+    }
 
-    Object.entries(states).forEach(([name, state]) => {
-        const card = document.createElement("div");
-        card.className = "process";
-
-        const title = document.createElement("strong");
-        title.textContent = name;
-
-        const badge = document.createElement("div");
-        badge.className = "status " + state;
-        badge.textContent = state;
-
-        card.append(title, badge);
-        box.appendChild(card);
-    });
+    timer = null;
+    el("play").textContent = "Start Simulation";
 }
 
-function render(index) {
+function chip(id) {
+    const cls = id.startsWith("Writer")
+        ? "process writer"
+        : "process";
+
+    return '<span class="' + cls + '">' + id + '</span>';
+}
+
+function render(position) {
     if (!events.length) return;
 
-    current = Math.max(0, Math.min(index, events.length - 1));
-    const e = events[current];
+    index = Math.max(
+        0,
+        Math.min(events.length - 1, position)
+    );
 
-    showStates("readers", e.readers);
-    showStates("writers", e.writers);
+    const e = events[index];
 
-    document.getElementById("resource").textContent = e.resource;
+    el("slider").value = index;
+    el("counter").textContent =
+        (index + 1) + " / " + events.length;
 
-    let active = [];
-    if (e.active_readers.length)
-        active.push("Reading: " + e.active_readers.join(", "));
-    if (e.active_writer)
-        active.push("Writing: " + e.active_writer);
+    el("data").textContent = e.sharedData;
+    el("count").textContent = e.activeReaders.length;
 
-    document.getElementById("active").textContent =
-        active.length ? active.join(" | ") : "No active processes";
+    const active = [...e.activeReaders];
 
-    document.getElementById("counter").textContent =
-        "Event " + e.number + " of " + events.length;
+    if (e.activeWriter) {
+        active.push(e.activeWriter);
+    }
 
-    document.getElementById("message").textContent = e.message;
-    slider.value = current;
+    const waiting = [
+        ...e.waitingReaders,
+        ...e.waitingWriters
+    ];
+
+    el("waitingList").innerHTML = waiting.length
+        ? waiting.map(chip).join("")
+        : '<span class="empty">No process waiting</span>';
+
+    el("activeList").innerHTML = active.length
+        ? active.map(chip).join("")
+        : '<span class="empty">Resource available</span>';
+
+    el("finishedList").innerHTML = e.finished.length
+        ? e.finished.map(chip).join("")
+        : '<span class="empty">No completed processes</span>';
+
+    el("current").textContent =
+        "Event " + e.n + " | " + e.actor + " | " +
+        e.action.replaceAll("_", " ") + " | " +
+        e.message + " | Resource: " + e.resourceState;
+
+    el("log").textContent = events
+        .slice(0, index + 1)
+        .map(event =>
+            "[" + event.time.toFixed(3) + "s] " +
+            event.actor + " - " +
+            event.action + ": " + event.message
+        )
+        .join("\n");
+
+    el("log").scrollTop = el("log").scrollHeight;
 }
 
-function previous() {
-    pause();
-    render(current - 1);
-}
+el("slider").max = Math.max(0, events.length - 1);
 
-function next() {
-    pause();
-    render(current + 1);
-}
+el("slider").addEventListener("input", event => {
+    stopPlayback();
+    render(Number(event.target.value));
+});
 
-function play() {
-    pause();
+el("previous").onclick = () => {
+    stopPlayback();
+    render(index - 1);
+};
+
+el("next").onclick = () => {
+    stopPlayback();
+    render(index + 1);
+};
+
+el("play").onclick = () => {
+    if (timer !== null) {
+        stopPlayback();
+        return;
+    }
+
+    if (index >= events.length - 1) {
+        render(0);
+    }
+
+    el("play").textContent = "Pause";
+
     timer = setInterval(() => {
-        if (current >= events.length - 1) {
-            pause();
+        if (index >= events.length - 1) {
+            stopPlayback();
             return;
         }
-        render(current + 1);
-    }, 900);
-}
 
-function pause() {
-    if (timer !== null) clearInterval(timer);
-    timer = null;
-}
+        render(index + 1);
+    }, 650);
+};
 
-slider.addEventListener("input", () => {
-    pause();
-    render(Number(slider.value));
-});
-
-events.forEach(e => {
-    const item = document.createElement("div");
-    item.className = "event";
-
-    const title = document.createElement("strong");
-    title.textContent = "Event " + e.number;
-
-    const message = document.createElement("p");
-    message.textContent = e.message;
-
-    item.append(title, message);
-    document.getElementById("timeline").appendChild(item);
-});
+el("reset").onclick = () => {
+    stopPlayback();
+    render(0);
+};
 
 render(0);
 </script>
+
 </body>
-</html>
-""";
+</html>'''
 
-        html = html.replace("EVENT_DATA", eventData);
+    return html_template.replace("__EVENT_DATA__", data)
 
-        try (FileWriter file = new FileWriter("simulation.html")) {
-            file.write(html);
-        }
 
-        System.out.println("\nHTML simulation generated successfully!");
-    }
+# =====================================================
+# MAIN PROGRAM
+# =====================================================
 
-    // Main method
-    public static void main(String[] args) {
+def main():
+    global start_time
 
-        readers.put("R1", "Not Started");
-        readers.put("R2", "Not Started");
-        readers.put("R3", "Not Started");
+    start_time = time.perf_counter()
 
-        writers.put("W1", "Not Started");
-        writers.put("W2", "Not Started");
+    log_event(
+        "START",
+        "SYSTEM",
+        "Launching reader and writer processes"
+    )
 
-        List<Thread> threads = new ArrayList<>();
+    # Different arrival times demonstrate waiting and contention.
+    threads = [
+        threading.Thread(
+            target=reader, args=("Reader 1", 0.00)
+        ),
+        threading.Thread(
+            target=reader, args=("Reader 2", 0.05)
+        ),
+        threading.Thread(
+            target=writer, args=("Writer 1", 0.12)
+        ),
+        threading.Thread(
+            target=reader, args=("Reader 3", 0.20)
+        ),
+        threading.Thread(
+            target=writer, args=("Writer 2", 0.30)
+        ),
+        threading.Thread(
+            target=reader, args=("Reader 4", 0.38)
+        ),
+        threading.Thread(
+            target=reader, args=("Reader 5", 0.45)
+        )
+    ]
 
-        System.out.println("Starting Readers-Writers Problem\\n");
+    for thread in threads:
+        thread.start()
 
-        for (String id : readers.keySet()) {
-            threads.add(new Thread(() -> reader(id)));
-        }
+    for thread in threads:
+        thread.join()
 
-        for (String id : writers.keySet()) {
-            threads.add(new Thread(() -> writer(id)));
-        }
+    log_event(
+        "COMPLETE",
+        "SYSTEM",
+        "All processes completed"
+    )
 
-        for (Thread t : threads) {
-            t.start();
-        }
+    # Generate HTML using the actual execution trace.
+    html_content = generate_html()
 
-        for (Thread t : threads) {
-            try {
-                t.join();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                System.out.println("Main thread interrupted.");
-                return;
-            }
-        }
-        try {
-        	generateHTML();
-        	} catch (IOException e) {
-        		System.out.println("Error generating HTML: " + e.getMessage());
-        		}
+    OUTPUT_FILE.write_text(
+        html_content,
+        encoding="utf-8"
+    )
 
-        System.out.println("\nAll processes completed.");
+    print("\nReaders-Writers Simulation Completed")
+    print("------------------------------------")
+    print("Events recorded:", len(events))
+    print("Final shared data:", shared_data)
+    print("HTML file:", OUTPUT_FILE.resolve())
+    print("Open the HTML file in your browser.")
 
-    }
-}
+
+if __name__ == "__main__":
+    main()
